@@ -304,7 +304,7 @@ def test_sequence(args):
     for data in test_data_list:
         seq_dataset = get_dataset(root_dir, [data], args, mode='test')
         seq_loader = DataLoader(seq_dataset, batch_size=1024, shuffle=False)
-        ind = np.array([i[1] for i in seq_dataset.index_map if i[0] == 0], dtype=np.int)
+        ind = np.array([i[1] for i in seq_dataset.index_map if i[0] == 0], dtype=int)
 
         targets, preds = run_test(network, seq_loader, device, True)
         losses = np.mean((targets - preds) ** 2, axis=0)
