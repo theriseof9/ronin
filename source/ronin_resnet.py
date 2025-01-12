@@ -250,7 +250,7 @@ def recon_traj_with_preds(dataset, preds, seq_id=0, **kwargs):
     Reconstruct trajectory with predicted global velocities.
     """
     ts = dataset.ts[seq_id]
-    ind = np.array([i[1] for i in dataset.index_map if i[0] == seq_id], dtype=np.int)
+    ind = np.array([i[1] for i in dataset.index_map if i[0] == seq_id], dtype=int)
     dts = np.mean(ts[ind[1:]] - ts[ind[:-1]])
     pos = np.zeros([preds.shape[0] + 2, 2])
     pos[0] = dataset.gt_pos[seq_id][0, :2]
