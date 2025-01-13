@@ -82,10 +82,22 @@ class Bottleneck1D(nn.Module):
         return out
 
 
-
 def add_time_1d(in_tensor, t):
     bs, c, seq_len = in_tensor.shape
-    time_channel = t.view(bs, 1, 1).expand(-1, 1, seq_len)
+
+    # Check if `t` is a scalar. If so, convert it to a tensor with proper shape
+    if not torch.is_tensor(t):
+        t = torch.tensor([t], dtype=in_tensor.dtype, device=in_tensor.device)
+
+    # Verify `t` is of the right shape, i.e., [1] or [bs]
+    if t.dim() == 0:
+        # If t is a scalar, repeat it for each batch
+        t = t.repeat(bs)
+
+    # Now expand `t` to match the desired dimensions
+    time_channel = t.view(bs, 1, 1).expand(bs, 1, seq_len)
+
+    # Concatenate the new time channel to the original input on the channel dimension
     return torch.cat((in_tensor, time_channel), dim=1)
 
 
