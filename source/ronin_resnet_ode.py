@@ -104,9 +104,9 @@ def add_time_1d(in_tensor, t):
 class ODEFunc1D(nn.Module):
     def __init__(self, in_planes, out_planes):
         super(ODEFunc1D, self).__init__()
-        conv = nn.Conv1d(in_planes, out_planes, kernel_size=3, padding=1, bias=False)
-        norm = nn.BatchNorm1d(out_planes)
-        relu = nn.ReLU(inplace=True)
+        self.conv = nn.Conv1d(in_planes, out_planes, kernel_size=3, padding=1, bias=False)
+        self.norm = nn.BatchNorm1d(out_planes)
+        self.relu = nn.ReLU(inplace=True)
 
 
     def forward(self, t, x):
