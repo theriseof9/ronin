@@ -4,6 +4,7 @@ The code is based on the original ResNet implementation from torchvision.models.
 
 import torch
 import torch.nn as nn
+from torchdiffeq import odeint
 
 
 def conv3(in_planes, out_planes, kernel_size, stride=1, dilation=1):
@@ -78,6 +79,46 @@ class Bottleneck1D(nn.Module):
         out += residual
         out = self.relu(out)
 
+        return out
+
+
+class ODEFunc1D(nn.Module):
+    def __init__(self, in_planes, out_planes):
+        super(ODEFunc1D, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(in_planes, out_planes, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm1d(out_planes),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, t, x):
+        return self.conv(x)
+
+"""class ConvODEF(ODEF):
+    def __init__(self, dim):
+        super(ConvODEF, self).__init__()
+        self.conv1 = conv3x3(dim + 1, dim)
+        self.norm1 = norm(dim)
+        self.conv2 = conv3x3(dim + 1, dim)
+        self.norm2 = norm(dim)
+
+    def forward(self, x, t):
+        xt = add_time(x, t)
+        h = self.norm1(torch.relu(self.conv1(xt)))
+        ht = add_time(h, t)
+        dxdt = self.norm2(torch.relu(self.conv2(ht)))
+        return dxdt
+"""
+
+class ODEBlock1D(nn.Module):
+    def __init__(self, odefunc):
+        super(ODEBlock1D, self).__init__()
+        self.odefunc = odefunc
+        self.integration_time = torch.tensor([0, 1]).float()
+
+    def forward(self, x):
+        self.integration_time = self.integration_time.type_as(x)
+        out = odeint(self.odefunc, x, self.integration_time, method='rk4')[1]
         return out
 
 
@@ -167,8 +208,7 @@ class ResNet1D(nn.Module):
         kernel_size = kwargs.get('kernel_size', 3)
         strides = [1] + [2] * (len(group_sizes) - 1)
         dilations = [1] * len(group_sizes)
-        groups = [self._make_residual_group1d(block_type, self.planes[i], kernel_size, group_sizes[i],
-                                              strides[i], dilations[i])
+        groups = [self._make_ode_group1d(self.planes[i], self.planes[i] * block_type.expansion, group_sizes[i])
                   for i in range(len(group_sizes))]
         self.residual_groups = nn.Sequential(*groups)
 
@@ -180,19 +220,26 @@ class ResNet1D(nn.Module):
 
         self._initialize(zero_init_residual)
 
-    def _make_residual_group1d(self, block_type, planes, kernel_size, blocks, stride=1, dilation=1):
-        downsample = None
-        if stride != 1 or self.inplanes != planes * block_type.expansion:
-            downsample = nn.Sequential(
-                nn.Conv1d(self.inplanes, planes * block_type.expansion, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm1d(planes * block_type.expansion))
-        layers = []
-        layers.append(block_type(self.inplanes, planes, kernel_size=kernel_size,
-                                 stride=stride, dilation=dilation, downsample=downsample))
-        self.inplanes = planes * block_type.expansion
-        for _ in range(1, blocks):
-            layers.append(block_type(self.inplanes, planes, kernel_size=kernel_size))
+    # def _make_residual_group1d(self, block_type, planes, kernel_size, blocks, stride=1, dilation=1):
+    #     downsample = None
+    #     if stride != 1 or self.inplanes != planes * block_type.expansion:
+    #         downsample = nn.Sequential(
+    #             nn.Conv1d(self.inplanes, planes * block_type.expansion, kernel_size=1, stride=stride, bias=False),
+    #             nn.BatchNorm1d(planes * block_type.expansion))
+    #     layers = []
+    #     layers.append(block_type(self.inplanes, planes, kernel_size=kernel_size,
+    #                              stride=stride, dilation=dilation, downsample=downsample))
+    #     self.inplanes = planes * block_type.expansion
+    #     for _ in range(1, blocks):
+    #         layers.append(block_type(self.inplanes, planes, kernel_size=kernel_size))
+    #
+    #     return nn.Sequential(*layers)
 
+    def _make_ode_group1d(self, in_planes, out_planes, blocks):
+        layers = []
+        for _ in range(blocks):
+            odefunc = ODEFunc1D(in_planes, out_planes)
+            layers.append(ODEBlock1D(odefunc))
         return nn.Sequential(*layers)
 
     def _initialize(self, zero_init_residual):
