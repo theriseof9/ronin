@@ -72,6 +72,52 @@ class ODEBlock(nn.Module):
         self.integration_time = self.integration_time.type_as(x)
         out = odeint(self.odefunc, x, self.integration_time, method='rk4')
         return out[1]
+class FCOutputModule(nn.Module):
+    """
+    Fully connected output module.
+    """
+    def __init__(self, in_planes, num_outputs, **kwargs):
+        """
+        Constructor for a fully connected output layer.
+
+        Args:
+          in_planes: number of planes (channels) of the layer immediately proceeding the output module.
+          num_outputs: number of output predictions.
+          fc_dim: dimension of the fully connected layer.
+          dropout: the keep probability of the dropout layer
+          trans_planes: (optional) number of planes of the transition convolutional layer.
+        """
+        super(FCOutputModule, self).__init__()
+        fc_dim = kwargs.get('fc_dim', 1024)
+        dropout = kwargs.get('dropout', 0.5)
+        in_dim = kwargs.get('in_dim', 7)
+        trans_planes = kwargs.get('trans_planes', None)
+        if trans_planes is not None:
+            self.transition = nn.Sequential(
+                nn.Conv1d(in_planes, trans_planes, kernel_size=1, bias=False),
+                nn.BatchNorm1d(trans_planes))
+            in_planes = trans_planes
+        else:
+            self.transition = None
+
+        self.fc = nn.Sequential(
+            nn.Linear(in_planes * in_dim, fc_dim),
+            nn.ReLU(True),
+            nn.Dropout(dropout),
+            nn.Linear(fc_dim, fc_dim),
+            nn.ReLU(True),
+            nn.Dropout(dropout),
+            nn.Linear(fc_dim, num_outputs))
+
+    def get_dropout(self):
+        return [m for m in self.fc if isinstance(m, torch.nn.Dropout)]
+
+    def forward(self, x):
+        if self.transition is not None:
+            x = self.transition(x)
+        x = x.view(x.size(0), -1)
+        y = self.fc(x)
+        return y
 
 class GlobAvgOutputModule(nn.Module):
     """ Global average output module. """
