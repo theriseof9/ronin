@@ -82,9 +82,11 @@ class Bottleneck1D(nn.Module):
         return out
 
 
-def add_time(in_tensor, t):
-    bs, c, w, h = in_tensor.shape
-    return torch.cat((in_tensor, t.expand(bs, 1, w, h)), dim=1)
+
+def add_time_1d(in_tensor, t):
+    bs, c, seq_len = in_tensor.shape
+    time_channel = t.view(bs, 1, 1).expand(-1, 1, seq_len)
+    return torch.cat((in_tensor, time_channel), dim=1)
 
 
 class ODEFunc1D(nn.Module):
@@ -96,9 +98,9 @@ class ODEFunc1D(nn.Module):
 
 
     def forward(self, t, x):
-        xt = add_time(x, t)
+        xt = add_time_1d(x, t)
         h = self.norm(self.relu(self.conv(xt)))
-        ht = add_time(h, t)
+        ht = add_time_1d(h, t)
         dxdt = self.norm(self.relu(self.conv(ht)))
         return dxdt
 
