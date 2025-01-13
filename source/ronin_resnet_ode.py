@@ -199,7 +199,7 @@ class ResNet1D(nn.Module):
 
     def get_num_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
-    
+
     def forward(self, x):
         x = self.input_block(x)
         x = self.residual_groups(x)
