@@ -260,7 +260,7 @@ class ResNet1D(nn.Module):
 
     def _make_ode_group1d(self, in_planes, out_planes, blocks):
         layers = []
-        current_planes = in_planes
+        current_planes = in_planes+1  # Add 1 to account for the time channel
         for _ in range(blocks):
             odefunc = ODEFunc1D(current_planes, out_planes)
             layers.append(ODEBlock1D(odefunc))
