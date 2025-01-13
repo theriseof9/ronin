@@ -8,6 +8,41 @@ def add_time(x, t):
     xt = torch.cat([x, t_expanded], dim=1)
     return xt
 
+def conv3(in_planes, out_planes, kernel_size, stride=1, dilation=1):
+    return nn.Conv1d(in_planes, out_planes, kernel_size=kernel_size, stride=stride,
+                     padding=kernel_size // 2, bias=False)
+
+class BasicBlock1D(nn.Module):
+    expansion = 1
+
+    def __init__(self, in_planes, out_planes, kernel_size, stride=1, dilation=1, downsample=None):
+        super(BasicBlock1D, self).__init__()
+        self.conv1 = conv3(in_planes, out_planes, kernel_size, stride, dilation)
+        self.bn1 = nn.BatchNorm1d(out_planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = conv3(out_planes, out_planes, kernel_size)
+        self.bn2 = nn.BatchNorm1d(out_planes)
+        self.stride = stride
+        self.downsample = downsample
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out += residual
+        out = self.relu(out)
+
+        return out
+
 class Conv1dODEFunc(nn.Module):
     def __init__(self, dim, kernel_size=3):
         super(Conv1dODEFunc, self).__init__()
