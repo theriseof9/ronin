@@ -179,7 +179,7 @@ class ResNet1D(nn.Module):
             odeblock = ODEBlock(odefunc)
             layers.append(odeblock)
         return nn.Sequential(*layers)
-    
+
     def _initialize(self, zero_init_residual):
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
@@ -196,6 +196,10 @@ class ResNet1D(nn.Module):
                 if isinstance(m, Conv1dODEFunc):
                     nn.init.constant_(m.bn2.weight, 0)  # Zero-initialize bn2 weight
 
+
+    def get_num_params(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    
     def forward(self, x):
         x = self.input_block(x)
         x = self.residual_groups(x)
