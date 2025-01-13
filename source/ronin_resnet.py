@@ -14,8 +14,6 @@ from torch.utils.data import DataLoader
 from data_glob_speed import *
 from transformations import *
 from metric import compute_ate_rte
-# from model_resnet1d import *
-from ronin_resnet_ode import *
 
 _input_channel, _output_channel = 6, 2
 _fc_config = {'fc_dim': 512, 'in_dim': 7, 'dropout': 0.5, 'trans_planes': 128}
@@ -415,10 +413,14 @@ if __name__ == '__main__':
     parser.add_argument('--feature_sigma', type=float, default=0.00001)
     parser.add_argument('--target_sigma', type=float, default=0.00001)
 
+    parser.add_argument('--ode', action='store_true')
     args = parser.parse_args()
 
     np.set_printoptions(formatter={'all': lambda x: '{:.6f}'.format(x)})
-
+    if args.ode:
+        from ronin_resnet_ode import *
+    else:
+        from model_resnet1d import *
     if args.mode == 'train':
         train(args)
     elif args.mode == 'test':
