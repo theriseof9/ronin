@@ -237,9 +237,11 @@ class ResNet1D(nn.Module):
 
     def _make_ode_group1d(self, in_planes, out_planes, blocks):
         layers = []
+        current_planes = in_planes
         for _ in range(blocks):
-            odefunc = ODEFunc1D(in_planes, out_planes)
+            odefunc = ODEFunc1D(current_planes, out_planes)
             layers.append(ODEBlock1D(odefunc))
+            current_planes = out_planes  # Update current_planes for subsequent layers
         return nn.Sequential(*layers)
 
     def _initialize(self, zero_init_residual):
