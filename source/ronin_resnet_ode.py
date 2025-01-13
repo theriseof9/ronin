@@ -132,7 +132,7 @@ class GlobAvgOutputModule(nn.Module):
         return self.fc(x)
 
 class ResNet1D(nn.Module):
-    def __init__(self, num_inputs, num_outputs, base_plane=64, output_block=None, zero_init_residual=False, **kwargs):
+    def __init__(self, num_inputs, num_outputs, block_type, group_sizes, base_plane=64, output_block=None, zero_init_residual=False, **kwargs):
         super(ResNet1D, self).__init__()
         self.base_plane = base_plane
         self.inplanes = self.base_plane
@@ -144,13 +144,14 @@ class ResNet1D(nn.Module):
             nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
         )
         # ODE Blocks
-        self.planes = [self.base_plane * (2 ** i) for i in range(4)]
+        self.group_sizes = group_sizes  # Store group sizes
+        self.planes = [self.base_plane * (2 ** i) for i in range(len(self.group_sizes))]
         kernel_size = kwargs.get('kernel_size', 3)
         groups = []
         in_planes = self.inplanes
-        for i, planes in enumerate(self.planes):
+        for i, (planes, num_layers) in enumerate(zip(self.planes, self.group_sizes)):
             stride = 1 if i == 0 else 2
-            layer = self._make_ode_layer(in_planes, planes, kernel_size, stride)
+            layer = self._make_ode_layer(in_planes, planes, kernel_size, stride, num_layers)
             groups.append(layer)
             in_planes = planes
         self.residual_groups = nn.Sequential(*groups)
@@ -162,7 +163,8 @@ class ResNet1D(nn.Module):
             self.output_block = output_block(self.inplanes, num_outputs, **kwargs)
         self._initialize(zero_init_residual)
 
-    def _make_ode_layer(self, in_planes, out_planes, kernel_size, stride=1):
+    def _make_ode_layer(self, in_planes, out_planes, kernel_size, stride=1, num_layers=1):
+        layers = []
         if stride != 1 or in_planes != out_planes:
             prelayer = nn.Sequential(
                 nn.Conv1d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False),
@@ -171,16 +173,13 @@ class ResNet1D(nn.Module):
             )
         else:
             prelayer = nn.Identity()
-
-        odefunc = Conv1dODEFunc(out_planes, kernel_size)
-        odeblock = ODEBlock(odefunc)
-
-        layer = nn.Sequential(
-            prelayer,
-            odeblock
-        )
-        return layer
-
+        layers.append(prelayer)
+        for _ in range(num_layers):
+            odefunc = Conv1dODEFunc(out_planes, kernel_size)
+            odeblock = ODEBlock(odefunc)
+            layers.append(odeblock)
+        return nn.Sequential(*layers)
+    
     def _initialize(self, zero_init_residual):
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
