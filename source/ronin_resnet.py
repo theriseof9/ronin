@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader
 from data_glob_speed import *
 from transformations import *
 from metric import compute_ate_rte
-from model_resnet1d import *
+# from model_resnet1d import *
+from ronin_resnet_ode import *
 
 _input_channel, _output_channel = 6, 2
 _fc_config = {'fc_dim': 512, 'in_dim': 7, 'dropout': 0.5, 'trans_planes': 128}
@@ -424,3 +425,13 @@ if __name__ == '__main__':
         test_sequence(args)
     else:
         raise ValueError('Undefined mode')
+
+
+
+"""
+000000000111111111122222222223333333333444444
+123456789012345678901234567890123456789012345
+CBEABBBEBDDACDBEBCBEBCCADEDECABCBBCDEDAACBDCB
+CBEADBB??DAAC?BDBCA?BCCADADDCACEBBCDEDAACBDCB
+====X=====X====X==X======X=X==XX=============
+"""
