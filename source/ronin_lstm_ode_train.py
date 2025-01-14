@@ -267,8 +267,13 @@ def train(args, **kwargs):
                 feat, targ, _, _ = batch
                 feat, targ = feat.to(device), targ.to(device)
                 optimizer.zero_grad()
-                timespan = torch.tensor([1.0], device=device)  # Or the actual time span
-                timespans = timespan.expand(feat.size(0))  # Shape: (batch_size,)
+                # Assuming feat.shape = (batch_size, seq_len, input_size)
+                batch_size, seq_len, _ = feat.shape
+                # Use a scalar timespan
+                timespan_value = 1.0  # Or any appropriate scalar value representing your time intervals
+                timespans = torch.full((batch_size, seq_len), timespan_value,
+                                       device=device)  # Shape: (batch_size, seq_len)
+                # Forward pass
                 predicted = network(feat, timespans)
                 train_vel.add(predicted.cpu().detach().numpy(), targ.cpu().detach().numpy())
                 loss = criterion(predicted, targ)
