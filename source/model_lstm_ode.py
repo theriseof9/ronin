@@ -32,7 +32,7 @@ class ODELSTMCell(nn.Module):
         timespans = timespans.unsqueeze(1)  # Shape: (batch_size, 1)
 
         # Integrate over time using the neural ODE
-        h = self.neural_ode(h, timespans)
+        h = self.neural_ode(h, 1)
 
         return h, c
 
