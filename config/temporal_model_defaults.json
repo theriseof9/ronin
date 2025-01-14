@@ -10,6 +10,6 @@
   "file": "seq2seq_models",
   "kernel_size": 3, "channels": [32, 64, 128, 256, 72, 36],
   "layer_size": 100, "layers":3,
-  "device": "gpu",
+  "device": "cuda",
   "dataset": "ronin"
 }
