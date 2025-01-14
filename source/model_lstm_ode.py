@@ -287,6 +287,7 @@ def compute_odelstm_loss(output, data, criterion):
 def train(args, **kwargs):
     # Loading data
     start_t = time.time()
+    kwargs.pop('mode', None)
     train_dataset = get_dataset_from_list(args.data_dir, args.train_list, args, mode='train', **kwargs)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True,
                               drop_last=True)
