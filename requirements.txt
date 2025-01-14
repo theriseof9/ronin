@@ -12,3 +12,4 @@ plyfile
 tqdm
 scikit-learn
 torchdiffeq
+torchdyn

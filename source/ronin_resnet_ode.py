@@ -196,9 +196,11 @@ class ResNet1D(nn.Module):
                 if isinstance(m, Conv1dODEFunc):
                     nn.init.constant_(m.bn2.weight, 0)  # Zero-initialize bn2 weight
 
-
     def get_num_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def get_total_params(self):
+        return sum(p.numel() for p in self.parameters())
 
     def forward(self, x):
         x = self.input_block(x)

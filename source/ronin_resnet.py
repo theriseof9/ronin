@@ -129,7 +129,8 @@ def train(args, **kwargs):
     if val_dataset:
         print('Number of val samples: {}'.format(len(val_dataset)))
     total_params = network.get_num_params()
-    print('Total number of parameters: ', total_params)
+    print('Total number of trainable parameters: ', total_params)
+    print('Total number of parameters: ', sum(p.numel() for p in network.parameters()))
 
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(network.parameters(), args.lr)
