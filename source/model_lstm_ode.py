@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-from torchdyn.core import NeuralDE
+from torchdiffeq import odeint
+
 
 class ODELSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size, ode_hidden_size=64, solver='dopri5'):
+    def __init__(self, input_size, hidden_size, ode_hidden_size=64, solver='rk4'):
         super(ODELSTMCell, self).__init__()
         self.lstm_cell = nn.LSTMCell(input_size, hidden_size)
         self.hidden_size = hidden_size
@@ -15,27 +16,23 @@ class ODELSTMCell(nn.Module):
             nn.Linear(ode_hidden_size, hidden_size)
         )
 
-        # Neural ODE for the hidden state evolution
-        self.neural_ode = NeuralDE(self.ode_func, solver=solver)
+        self.solver = solver
 
     def forward(self, input, hx, timespans):
-        """
-        input: (batch_size, input_size) - current input
-        hx: (h_prev, c_prev) - tuple of previous hidden and cell states
-        timespans: (batch_size,) - time intervals for ODE integration
-        """
         h, c = self.lstm_cell(input, hx)
 
-        # Evolve the hidden state h over the given timespan
-        # timespans is expected to be a Tensor of shape (batch_size,)
-        # NeuralDE expects time intervals, so we expand timespans to match NeuralDE's expected shape
-        timespans = timespans.unsqueeze(1)  # Shape: (batch_size, 1)
-
-        # Integrate over time using the neural ODE
-        h = self.neural_ode(h, 1)
-
+        # Use torchdiffeq's odeint
+        # h: (batch_size, hidden_size)
+        batch_size = h.size(0)
+        h_list = []
+        for i in range(batch_size):
+            h_i = h[i].unsqueeze(0)  # Shape: (1, hidden_size)
+            timespan_i = torch.tensor([0, timespans[i]], device=h.device)
+            h_i = odeint(self.ode_func, h_i, timespan_i, method=self.solver)
+            h_i = h_i[-1]  # Take the final time point
+            h_list.append(h_i)
+        h = torch.cat(h_list, dim=0)
         return h, c
-
 
 class ODELSTM(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers=1, ode_hidden_size=64, solver='dopri5'):
