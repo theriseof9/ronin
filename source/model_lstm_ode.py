@@ -3,26 +3,32 @@ import torch.nn as nn
 from torchdiffeq import odeint
 
 
-class ODELSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size, ode_hidden_size=64, solver='rk4'):
-        super(ODELSTMCell, self).__init__()
-        self.lstm_cell = nn.LSTMCell(input_size, hidden_size)
-        self.hidden_size = hidden_size
-
-        # Define the ODE function for the hidden state h
-        self.ode_func = nn.Sequential(
+class ODEFunc(nn.Module):
+    def __init__(self, hidden_size, ode_hidden_size):
+        super(ODEFunc, self).__init__()
+        self.net = nn.Sequential(
             nn.Linear(hidden_size, ode_hidden_size),
             nn.Tanh(),
             nn.Linear(ode_hidden_size, hidden_size)
         )
 
+    def forward(self, t, y):
+        return self.net(y)
+
+class ODELSTMCell(nn.Module):
+    def __init__(self, input_size, hidden_size, ode_hidden_size=64, solver='rk4'):
+        super(ODELSTMCell, self).__init__()
+        self.lstm_cell = nn.LSTMCell(input_size, hidden_size)
+        self.hidden_size = hidden_size
         self.solver = solver
+
+        # Use the custom ODE function
+        self.ode_func = ODEFunc(hidden_size, ode_hidden_size)
 
     def forward(self, input, hx, timespans):
         h, c = self.lstm_cell(input, hx)
 
         # Use torchdiffeq's odeint
-        # h: (batch_size, hidden_size)
         batch_size = h.size(0)
         h_list = []
         for i in range(batch_size):
@@ -35,7 +41,7 @@ class ODELSTMCell(nn.Module):
         return h, c
 
 class ODELSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=1, ode_hidden_size=64, solver='dopri5'):
+    def __init__(self, input_size, hidden_size, num_layers=1, ode_hidden_size=64, solver='rk4'):
         super(ODELSTM, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -45,11 +51,6 @@ class ODELSTM(nn.Module):
             self.cells.append(ODELSTMCell(layer_input_size, hidden_size, ode_hidden_size, solver))
 
     def forward(self, inputs, timespans, hx=None):
-        """
-        inputs: (batch_size, seq_len, input_size)
-        timespans: (batch_size, seq_len) - time intervals for each time step in the sequence
-        hx: optional initial hidden and cell states
-        """
         batch_size, seq_len, _ = inputs.size()
 
         if hx is None:
@@ -62,14 +63,11 @@ class ODELSTM(nn.Module):
         for t in range(seq_len):
             input_t = inputs[:, t, :]  # (batch_size, input_size)
             timespan_t = timespans[:, t]  # (batch_size,)
-
             for layer in range(self.num_layers):
                 h[layer], c[layer] = self.cells[layer](input_t, (h[layer], c[layer]), timespan_t)
-                input_t = h[layer]  # Output of the current layer is input to the next layer
-
-            outputs.append(h[-1].unsqueeze(1))  # Collect output from the last layer
-
-        outputs = torch.cat(outputs, dim=1)  # (batch_size, seq_len, hidden_size)
+                input_t = h[layer]
+            outputs.append(h[-1].unsqueeze(1))
+        outputs = torch.cat(outputs, dim=1)
         return outputs, (h, c)
 
 
