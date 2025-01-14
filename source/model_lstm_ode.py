@@ -26,18 +26,17 @@ class ODELSTMCell(nn.Module):
         self.ode_func = ODEFunc(hidden_size, ode_hidden_size)
 
     def forward(self, input, hx, timespans):
-        h, c = self.lstm_cell(input, hx)
+        h, c = self.lstm_cell(input, hx)  # h: (batch_size, hidden_size)
 
-        # Use torchdiffeq's odeint
-        batch_size = h.size(0)
-        h_list = []
-        for i in range(batch_size):
-            h_i = h[i].unsqueeze(0)  # Shape: (1, hidden_size)
-            timespan_i = torch.tensor([0, timespans[i]], device=h.device)
-            h_i = odeint(self.ode_func, h_i, timespan_i, method=self.solver)
-            h_i = h_i[-1]  # Take the final time point
-            h_list.append(h_i)
-        h = torch.cat(h_list, dim=0)
+        # timespans: (batch_size,)
+        # We need to ensure that timespans are the same for all samples
+        # For batch processing, we'll use a common timespan
+
+        timespan = timespans[0].item()  # Assuming timespans are the same
+        timespan_tensor = torch.tensor([0, timespan], device=h.device)
+
+        h = odeint(self.ode_func, h, timespan_tensor, method=self.solver)
+        h = h[-1]  # Take the final time point
         return h, c
 
 class ODELSTM(nn.Module):
@@ -63,13 +62,17 @@ class ODELSTM(nn.Module):
         for t in range(seq_len):
             input_t = inputs[:, t, :]  # (batch_size, input_size)
             timespan_t = timespans[:, t]  # (batch_size,)
+
+            # Ensure timespans are the same
+            timespan = timespan_t[0].item()
+            timespan_tensor = torch.tensor([0, timespan], device=inputs.device)
+
             for layer in range(self.num_layers):
                 h[layer], c[layer] = self.cells[layer](input_t, (h[layer], c[layer]), timespan_t)
                 input_t = h[layer]
             outputs.append(h[-1].unsqueeze(1))
         outputs = torch.cat(outputs, dim=1)
         return outputs, (h, c)
-
 
 class ODELSTMSeqNetwork(nn.Module):
     def __init__(self, input_size, out_size, lstm_size=100, lstm_layers=3, ode_hidden_size=64, solver='dopri5'):

@@ -263,12 +263,12 @@ def train(args, **kwargs):
             train_vel = MSEAverageMeter(3, [2], _output_channel)
             train_loss = 0
             start_t = time.time()
-            for bid, batch in tqdm(enumerate(train_loader)):
+            for bid, batch in enumerate(train_loader):
                 feat, targ, _, _ = batch
                 feat, targ = feat.to(device), targ.to(device)
                 optimizer.zero_grad()
-                # Generate timespans
-                timespans = torch.ones(feat.size(0), feat.size(1), device=device)
+                timespan = torch.tensor([1.0], device=device)  # Or the actual time span
+                timespans = timespan.expand(feat.size(0))  # Shape: (batch_size,)
                 predicted = network(feat, timespans)
                 train_vel.add(predicted.cpu().detach().numpy(), targ.cpu().detach().numpy())
                 loss = criterion(predicted, targ)
