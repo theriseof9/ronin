@@ -263,7 +263,7 @@ def train(args, **kwargs):
             train_vel = MSEAverageMeter(3, [2], _output_channel)
             train_loss = 0
             start_t = time.time()
-            for bid, batch in enumerate(train_loader):
+            for bid, batch in tqdm(enumerate(train_loader), total=train_mini_batches):
                 feat, targ, _, _ = batch
                 feat, targ = feat.to(device), targ.to(device)
                 optimizer.zero_grad()
