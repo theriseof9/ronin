@@ -5,7 +5,7 @@ import time
 from os import path as osp
 from pathlib import Path
 from shutil import copyfile
-
+from tqdm import tqdm
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -149,6 +149,7 @@ def get_model(args, **kwargs):
 
     pytorch_total_params = sum(p.numel() for p in network.parameters() if p.requires_grad)
     print('Network constructed. Trainable parameters: {}'.format(pytorch_total_params))
+    print('Total parameters: {}'.format(sum(p.numel() for p in network.parameters())))
     return network
 
 def get_loss_function(history, args, **kwargs):
@@ -262,7 +263,7 @@ def train(args, **kwargs):
             train_vel = MSEAverageMeter(3, [2], _output_channel)
             train_loss = 0
             start_t = time.time()
-            for bid, batch in enumerate(train_loader):
+            for bid, batch in tqdm(enumerate(train_loader)):
                 feat, targ, _, _ = batch
                 feat, targ = feat.to(device), targ.to(device)
                 optimizer.zero_grad()
