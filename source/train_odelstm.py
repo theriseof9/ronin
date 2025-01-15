@@ -484,6 +484,7 @@ def train(args, **kwargs):
 
 # python ronin/source/train_odelstm.py test --data_dir data/unseen_subjects_test_set/ --test_list ronin/lists/list_train_amended.txt --model_path lstmode2/checkpoints/icheckpoint_22.pt --out_dir lstmode2test --device cuda:0
 
+
 def test(args, **kwargs):
     global device, _output_channel
     import matplotlib.pyplot as plt
@@ -659,6 +660,7 @@ if __name__ == '__main__':
     parser.add_argument('--out_dir', type=str, default=None)
     parser.add_argument('--device', type=str, help='Cuda device (e.g., cuda:0) or cpu')
     parser.add_argument('--dataset', type=str, choices=['ronin', 'ridi'])
+    parser.add_argument('--type', type=str, choices=['odelstm'])
 
     # ODELSTM-specific arguments
     parser.add_argument('--hidden_size', type=int, default=100)
@@ -678,6 +680,7 @@ if __name__ == '__main__':
 
 
     # Update the parser to include test mode arguments
+
     test_cmd = mode.add_parser('test')
     test_cmd.add_argument('--test_path', type=str, default=None)
     test_cmd.add_argument('--test_list', type=str, default=None)
