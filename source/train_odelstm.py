@@ -476,22 +476,18 @@ def train(args, **kwargs):
         }, model_path)
 
 
-def recon_traj_with_preds_global(dataset, preds, ind=None, seq_id=0, type='preds', **kwargs):
+def recon_traj_with_preds_global(dataset, preds, timespans, ind=None, seq_id=0, type='pred', **kwargs):
     ind = ind if ind is not None else np.array([i[1] for i in dataset.index_map if i[0] == seq_id], dtype=int)
-
     if type == 'gt':
         pos = dataset.gt_pos[seq_id][:, :2]
     else:
-        ts = dataset.ts[seq_id]
-        # Compute the global velocity from local velocity.
-        dts = np.mean(ts[ind[1:]] - ts[ind[:-1]])
-        pos = preds * dts
+        # Compute the global position from global velocities by numerical integration
+        pos = np.zeros_like(preds)
         pos[0, :] = dataset.gt_pos[seq_id][0, :2]
-        pos = np.cumsum(pos, axis=0)
-    veloc = preds
-    ori = dataset.orientations[seq_id]
-
-    return pos, veloc, ori
+        for i in range(1, preds.shape[0]):
+            dt = timespans[i]
+            pos[i, :] = pos[i-1, :] + preds[i-1, :] * dt
+    return pos
 
 
 # python ronin/source/train_odelstm.py test --data_dir data/unseen_subjects_test_set/ --test_list ronin/lists/list_train_amended.txt --model_path lstmode2/checkpoints/icheckpoint_22.pt --out_dir lstmode2test --device cuda:0
