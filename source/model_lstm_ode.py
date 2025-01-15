@@ -32,27 +32,6 @@ _input_channel, _output_channel = 6, 2
 device = 'cpu'
 
 
-def create_odelstm_config(args):
-    from neuralhydrology.utils.config import Config
-
-    # Parse comma-separated lists into appropriate data structures
-    use_frequencies = args.use_frequencies.split(',')
-    predict_last_n = {freq: int(n) for freq, n in zip(use_frequencies, args.predict_last_n.split(','))}
-    seq_length = {freq: int(n) for freq, n in zip(use_frequencies, args.seq_length.split(','))}
-
-    config_dict = {
-        'hidden_size': args.hidden_size,
-        'use_frequencies': use_frequencies,
-        'predict_last_n': predict_last_n,
-        'seq_length': seq_length,
-        'ode_random_freq_lower_bound': args.ode_random_freq_lower_bound,
-        'ode_num_unfolds': args.ode_num_unfolds,
-        'ode_method': args.ode_method,
-        # Other necessary parameters
-        # ...
-    }
-    cfg = Config(config_dict)
-    return cfg
 class GlobalPosLoss(torch.nn.Module):
     def __init__(self, mode='full', history=None):
         """
@@ -139,19 +118,10 @@ def get_model(args, **kwargs):
         print("Bilinear LSTM Network")
         network = BilinearLSTMSeqNetwork(_input_channel, _output_channel, args.batch_size, device,
                                          lstm_layers=args.layers, lstm_size=args.layer_size, **config).to(device)
-
-    elif args.type == 'odelstm':
-        print("ODELSTM Network")
-        from neuralhydrology.modelzoo.odelstm import ODELSTM
-        cfg = create_odelstm_config(args)
-        network = ODELSTM(cfg).to(device)
-
     else:
         print("Simple LSTM Network")
-        network = LSTMSeqNetwork(
-            _input_channel, _output_channel, args.batch_size, device,
-            lstm_layers=args.layers, lstm_size=args.layer_size, **config
-        ).to(device)
+        network = LSTMSeqNetwork(_input_channel, _output_channel, args.batch_size, device,
+                                 lstm_layers=args.layers, lstm_size=args.layer_size, **config).to(device)
 
     pytorch_total_params = sum(p.numel() for p in network.parameters() if p.requires_grad)
     print('Network constructed. trainable parameters: {}'.format(pytorch_total_params))
@@ -180,114 +150,9 @@ def format_string(*argv, sep=' '):
     return result[:-1]
 
 
-def prepare_odelstm_data(batch, frequencies, cfg, device):
-    """
-    Extract inputs and targets from the batch and organize them
-    into the dictionary format expected by ODELSTM.
-
-    Parameters:
-    - batch: The input batch from the DataLoader.
-    - frequencies: A list of frequencies used by the ODELSTM model, sorted from lowest to highest frequency.
-    - cfg: Configuration object containing model and training settings.
-    - device: The device (CPU or GPU) to move the tensors to.
-
-    Returns:
-    - data: A dictionary containing the inputs and targets per frequency.
-    """
-
-    # Unpacking the batch
-    # Assuming batch is a tuple: (inputs, targets, static_attributes, other_data)
-    # Adjust this based on your actual batch structure
-    inputs, targets, static_attrs, _ = batch
-
-    # Move inputs, targets, and static_attrs to the device
-    inputs = inputs.to(device)        # Shape: (batch_size, seq_length_high, input_size)
-    targets = targets.to(device)      # Shape: (batch_size, seq_length_high, output_size)
-    static_attrs = static_attrs.to(device)  # Shape: (batch_size, num_static_features)
-
-    # Initialize the data dictionary
-    data = {}
-
-    # The highest frequency is assumed to have the smallest interval (e.g., 'hourly')
-    highest_freq = frequencies[-1]
-
-    # We'll need the frequency factors to downsample or aggregate data
-    frequency_factors = cfg._frequency_factors  # Assuming cfg has this attribute
-    slice_timesteps = cfg._slice_timesteps     # Assuming cfg has this attribute
-
-    # Prepare data for each frequency
-    for i, freq in enumerate(frequencies):
-        freq_suffix = f"_{freq}"
-        factor = frequency_factors[freq]  # Factor relative to the lowest frequency (cfg._frequencies[0])
-
-        # Determine the sequence length for the current frequency
-        seq_length = cfg.seq_length[freq]
-
-        # For the highest frequency, use the inputs and targets directly
-        if freq == highest_freq:
-            # Transpose to [seq_length, batch_size, input_size]
-            x_d = inputs[:, -seq_length:, :].transpose(0, 1)  # Shape: [seq_length, batch_size, input_size]
-            y = targets[:, -seq_length:, :].transpose(0, 1)   # Shape: [seq_length, batch_size, output_size]
-        else:
-            # For lower frequencies, downsample or aggregate the inputs and targets
-            # Determine the indices to select from the high-frequency data
-            step = factor
-            x_d_high = inputs[:, -seq_length * step:, :]  # Shape: [batch_size, seq_length * step, input_size]
-            y_high = targets[:, -seq_length * step:, :]   # Shape: [batch_size, seq_length * step, output_size]
-
-            batch_size = x_d_high.size(0)
-            # Reshape and aggregate over the time dimension
-            x_d = x_d_high.reshape(batch_size, seq_length, step, -1).mean(dim=2)
-            y = y_high.reshape(batch_size, seq_length, step, -1).mean(dim=2)
-
-            # Transpose to [seq_length, batch_size, input_size]
-            x_d = x_d.transpose(0, 1)
-            y = y.transpose(0, 1)
-
-        # Add dynamic inputs to the data dictionary
-        data[f'x_d{freq_suffix}'] = x_d  # Shape: [seq_length, batch_size, input_size]
-
-        # Add static inputs if any
-        if static_attrs is not None:
-            # Expand static attrs to match the sequence length
-            x_s = static_attrs.unsqueeze(0).repeat(seq_length, 1, 1)
-            data[f'x_s{freq_suffix}'] = x_s  # Shape: [seq_length, batch_size, num_static_features]
-
-        # Add targets to the data dictionary
-        data[f'y{freq_suffix}'] = y  # Shape: [seq_length, batch_size, output_size]
-
-    # If using basin ID encoding or other one-hot encodings, include them
-    if cfg.use_basin_id_encoding:
-        data['x_one_hot'] = batch['x_one_hot'].to(device)  # Shape: [batch_size, num_basins]
-        # Expand and repeat to match sequence length
-        data['x_one_hot'] = data['x_one_hot'].unsqueeze(0).repeat(seq_length, 1, 1)
-
-    return data
-def compute_odelstm_loss(output, data, criterion):
-    """
-    Compute the loss over all frequencies.
-
-    Parameters:
-    - output: The model's output dictionary, with keys like 'y_hat_daily', 'y_hat_hourly', etc.
-    - data: The data dictionary containing targets, with keys like 'y_daily', 'y_hourly', etc.
-    - criterion: The loss function (e.g., nn.MSELoss()).
-
-    Returns:
-    - loss: The total loss summed over all frequencies.
-    """
-    loss = 0
-    for freq in output.keys():
-        freq_suffix = f"_{freq.split('_')[-1]}"
-        y_hat = output[freq]  # Predicted outputs
-        y_true = data[f'y{freq_suffix}']  # Ground truth targets
-        # Reshape y_true if necessary to match y_hat
-        # Compute loss for the current frequency
-        loss += criterion(y_hat, y_true)
-    return loss
 def train(args, **kwargs):
     # Loading data
     start_t = time.time()
-    kwargs.pop('mode', None)
     train_dataset = get_dataset_from_list(args.data_dir, args.train_list, args, mode='train', **kwargs)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True,
                               drop_last=True)
@@ -368,19 +233,19 @@ def train(args, **kwargs):
             train_vel = MSEAverageMeter(3, [2], _output_channel)
             train_loss = 0
             start_t = time.time()
+
             for bid, batch in enumerate(train_loader):
-                # Prepare the data dictionary expected by ODELSTM
-                data = prepare_odelstm_data(batch)
+                feat, targ, _, _ = batch
+                feat, targ = feat.to(device), targ.to(device)
                 optimizer.zero_grad()
-                output = network(data)
-                train_vel.add(output.cpu().detach().numpy(), data['y_freq1'].cpu().detach().numpy())
-                # The output is a dictionary with keys like 'y_hat_freq'
-                # You need to aggregate losses over all frequencies
-                loss = compute_odelstm_loss(output, data, criterion)
-                train_loss += loss.item()
+                predicted = network(feat)
+                train_vel.add(predicted.cpu().detach().numpy(), targ.cpu().detach().numpy())
+                loss = criterion(predicted, targ)
+                train_loss += loss.cpu().detach().numpy()
                 loss.backward()
                 optimizer.step()
                 step += 1
+
             train_errs[epoch] = train_loss / train_mini_batches
             end_t = time.time()
             if not quiet_mode:
@@ -614,9 +479,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, help='Configuration file [Default: {}]'.format(default_config_file),
                         default=default_config_file)
     # common
-
-    parser.add_argument('--type', type=str, choices=['tcn', 'lstm', 'lstm_bi', 'odelstm'],
-                        help='Model type')
+    parser.add_argument('--type', type=str, choices=['tcn', 'lstm', 'lstm_bi'], help='Model type')
     parser.add_argument('--data_dir', type=str, help='Directory for data files if different from list path.')
     parser.add_argument('--cache_path', type=str, default=None)
     parser.add_argument('--feature_sigma', type=float, help='Gaussian for smoothing features')
@@ -636,19 +499,6 @@ if __name__ == '__main__':
     lstm_cmd = parser.add_argument_group('lstm', 'configuration for LSTM')
     lstm_cmd.add_argument('--layers', type=int)
     lstm_cmd.add_argument('--layer_size', type=int)
-    # ODELSTM specific arguments
-    odelstm_cmd = parser.add_argument_group('odelstm', 'configuration for ODELSTM')
-    odelstm_cmd.add_argument('--hidden_size', type=int, help='Hidden size of the ODE-LSTM model')
-    odelstm_cmd.add_argument('--use_frequencies', type=str, help='List of frequencies to use (comma-separated)')
-    odelstm_cmd.add_argument('--predict_last_n', type=str,
-                             help='Number of steps to predict at each frequency (comma-separated)')
-    odelstm_cmd.add_argument('--seq_length', type=str, help='Sequence lengths for each frequency (comma-separated)')
-    odelstm_cmd.add_argument('--ode_random_freq_lower_bound', type=str,
-                             help='Random frequency lower bound for ODELSTM')
-    odelstm_cmd.add_argument('--ode_num_unfolds', type=int, default=1,
-                             help='Number of unfolds for ODE solver')
-    odelstm_cmd.add_argument('--ode_method', type=str, choices=['euler', 'heun', 'rk4'],
-                             default='euler', help='ODE solver method')
 
     mode = parser.add_subparsers(title='mode', dest='mode', help='Operation: [train] train model, [test] evaluate model')
     mode.required = True
