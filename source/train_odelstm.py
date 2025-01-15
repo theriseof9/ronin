@@ -95,6 +95,7 @@ class ODELSTM(torch.nn.Module):
         self.rnn_cell = ODELSTMCell(in_features, hidden_size, solver_type=solver_type)
         self.fc = torch.nn.Linear(self.hidden_size, self.out_feature)
 
+
     def forward(self, x, timespans, mask=None):
         device = x.device
         batch_size = x.size(0)
@@ -107,6 +108,10 @@ class ODELSTM(torch.nn.Module):
         last_output = torch.zeros((batch_size, self.out_feature), device=device)
         for t in range(seq_len):
             inputs = x[:, t]
+            if inputs.dim() == 3:
+                print("Squeezing inputs at time step {} from shape {}".format(t, inputs.shape))
+                inputs = inputs.squeeze(1)
+            print("inputs shape at time step {}: {}".format(t, inputs.shape))  # Debug print
             ts = timespans[:, t].squeeze()
             hidden_state = self.rnn_cell(inputs, hidden_state, ts)
             current_output = self.fc(hidden_state[0])
@@ -477,24 +482,12 @@ def train(args, **kwargs):
         }, model_path)
 
 
-def recon_traj_with_preds_global(dataset, preds, timespans, ind=None, seq_id=0, type='pred', **kwargs):
-    ind = ind if ind is not None else np.array([i[1] for i in dataset.index_map if i[0] == seq_id], dtype=int)
-    if type == 'gt':
-        pos = dataset.gt_pos[seq_id][:, :2]
-    else:
-        # Compute the global position from global velocities by numerical integration
-        pos = np.zeros_like(preds)
-        pos[0, :] = dataset.gt_pos[seq_id][0, :2]
-        for i in range(1, preds.shape[0]):
-            dt = timespans[i]
-            pos[i, :] = pos[i-1, :] + preds[i-1, :] * dt
-    return pos
-
-
 # python ronin/source/train_odelstm.py test --data_dir data/unseen_subjects_test_set/ --test_list ronin/lists/list_train_amended.txt --model_path lstmode2/checkpoints/icheckpoint_22.pt --out_dir lstmode2test --device cuda:0
+
 def test(args, **kwargs):
     global device, _output_channel
     import matplotlib.pyplot as plt
+
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
     if args.test_path is not None:
@@ -515,13 +508,13 @@ def test(args, **kwargs):
     if args.out_dir and not osp.exists(args.out_dir):
         os.makedirs(args.out_dir)
 
-    # Load the saved model
     with open(osp.join(str(Path(args.model_path).parents[1]), 'config.json'), 'r') as f:
         model_data = json.load(f)
+
     if device.type == 'cpu':
         checkpoint = torch.load(args.model_path, map_location=lambda storage, location: storage)
     else:
-        checkpoint = torch.load(args.model_path, map_location={model_data.get('device', 'cpu'): args.device})
+        checkpoint = torch.load(args.model_path, map_location={model_data['device']: args.device})
 
     network = get_model(args, **kwargs)
     network.load_state_dict(checkpoint.get('model_state_dict'))
@@ -533,36 +526,38 @@ def test(args, **kwargs):
         log_file = osp.join(args.out_dir, osp.split(args.test_list)[-1].split('.')[0] + '_log.txt')
         with open(log_file, 'w') as f:
             f.write(args.model_path + '\n')
-            f.write('Seq\tATE\tRTE\n')
+            f.write('Seq traj_len velocity ate rte\n')
 
     losses_vel = MSEAverageMeter(2, [1], _output_channel)
     ate_all, rte_all = [], []
-    pred_per_min = 200 * 60  # Adjust based on your sampling rate
+    pred_per_min = 200 * 60
 
     seq_dataset = get_dataset(root_dir, test_data_list, args, mode='test', **kwargs)
     for idx, data in enumerate(test_data_list):
         assert data == osp.split(seq_dataset.data_path[idx])[1]
-        feat, vel = seq_dataset.get_test_seq(idx)
-        feat = torch.Tensor(feat).unsqueeze(0).to(device)  # Add batch dimension
 
-        # Assuming constant timespans
-        timespans = torch.ones((feat.size(0), feat.size(1)), device=device)
+        # Here we assume that the dataset returns feat and vel
+        feat, vel = seq_dataset.get_test_seq(idx)
+        feat = torch.Tensor(feat).to(device)
+        batch_size, seq_len, _ = feat.size()
+
+        # Assuming constant timespans (set to ones)
+        timespans = torch.ones((batch_size, seq_len), device=device)
 
         with torch.no_grad():
-            preds = network(feat, timespans)  # Pass timespans to network
-        preds = preds.cpu().numpy().squeeze(0)  # Remove batch dimension
-        vel = vel[:preds.shape[0], :_output_channel]
+            preds = network(feat, timespans).cpu().numpy()
+        preds = np.squeeze(preds)[-vel.shape[0]:, :_output_channel]
         ind = np.arange(vel.shape[0])
 
         vel_losses = np.mean((vel - preds) ** 2, axis=0)
         losses_vel.add(vel, preds)
+
         print('Reconstructing trajectory')
         pos_pred, gv_pred, _ = recon_traj_with_preds_global(seq_dataset, preds, ind=ind, type='pred', seq_id=idx)
         pos_gt, gv_gt, _ = recon_traj_with_preds_global(seq_dataset, vel, ind=ind, type='gt', seq_id=idx)
 
         if args.out_dir is not None and osp.isdir(args.out_dir):
-            np.save(osp.join(args.out_dir, '{}_odelstm.npy'.format(data)),
-                    np.concatenate([pos_pred, pos_gt], axis=1))
+            np.save(osp.join(args.out_dir, '{}_{}.npy'.format(data, args.type)), np.concatenate([pos_pred, pos_gt], axis=1))
 
         ate = compute_absolute_trajectory_error(pos_pred, pos_gt)
         if pos_pred.shape[0] < pred_per_min:
@@ -574,6 +569,7 @@ def test(args, **kwargs):
         pos_cum_error = np.linalg.norm(pos_pred - pos_gt, axis=1)
         ate_all.append(ate)
         rte_all.append(rte)
+
         print('Sequence {}, Velocity loss {} / {}, ATE: {}, RTE:{}'.format(data, vel_losses, np.mean(vel_losses), ate, rte))
         log_line = format_string(data, np.mean(vel_losses), ate, rte)
 
@@ -603,7 +599,7 @@ def test(args, **kwargs):
             if args.show_plot:
                 plt.show()
             if args.out_dir is not None and osp.isdir(args.out_dir):
-                plt.savefig(osp.join(args.out_dir, '{}_odelstm.png'.format(data)))
+                plt.savefig(osp.join(args.out_dir, '{}_{}.png'.format(data, args.type)))
             plt.close('all')
 
         if log_file is not None:
@@ -620,6 +616,22 @@ def test(args, **kwargs):
         with open(log_file, 'a') as f:
             f.write(measure + '\n')
             f.write(values)
+
+
+def recon_traj_with_preds_global(dataset, preds, ind=None, seq_id=0, type='pred', **kwargs):
+    ind = ind if ind is not None else np.array([i[1] for i in dataset.index_map if i[0] == seq_id], dtype=int)
+    if type == 'gt':
+        pos = dataset.gt_pos[seq_id][:, :2]
+    else:
+        ts = dataset.ts[seq_id]
+        # Compute the global position from global velocity.
+        dts = np.mean(ts[ind[1:]] - ts[ind[:-1]])
+        pos = preds * dts
+        pos[0, :] = dataset.gt_pos[seq_id][0, :2]
+        pos = np.cumsum(pos, axis=0)
+    veloc = preds
+    ori = dataset.orientations[seq_id]
+    return pos, veloc, ori
 
 
 if __name__ == '__main__':
@@ -665,6 +677,7 @@ if __name__ == '__main__':
     train_cmd.add_argument('--lr', '--learning_rate', type=float)
 
 
+    # Update the parser to include test mode arguments
     test_cmd = mode.add_parser('test')
     test_cmd.add_argument('--test_path', type=str, default=None)
     test_cmd.add_argument('--test_list', type=str, default=None)
@@ -682,8 +695,11 @@ if __name__ == '__main__':
     if args.mode == 'train':
         train(args, **kwargs)
     elif args.mode == 'test':
+        if not args.model_path:
+            raise ValueError("Model path required")
+        args.batch_size = 1  # For testing, we process one sequence at a time
         test(args, **kwargs)
     else:
-        raise NotImplementedError("Only train mode is implemented in this script for ODELSTM.")
+        raise NotImplementedError(f"Unknown mode '{args.mode}' specified.")
 
     # python ronin/source/train_odelstm.py train --data_dir data/alldata --train_list ronin/lists/list_train_amended.txt --val_list list_val.txt --epochs 100 --batch_size 1024 --lr 0.001 --window_size 200 --step_size 10 --hidden_size 128 --solver_type fixed_rk4 --out_dir lstmode2
