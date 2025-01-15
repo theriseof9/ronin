@@ -480,7 +480,7 @@ if __name__ == '__main__':
     Run file with individual arguments or/and config file.
     If an argument appears in both config file and args, args is given precedence.
     """
-    default_config_file = osp.abspath(osp.join(osp.abspath(__file__), 'odelstm_defaults.json'))
+    default_config_file = osp.abspath(osp.join(osp.abspath(__file__), '../../config/temporal_model_defaults.json'))
 
     import argparse
 
