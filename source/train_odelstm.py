@@ -105,16 +105,11 @@ class ODELSTM(torch.nn.Module):
         outputs = []
         last_output = torch.zeros((batch_size, self.out_feature), device=device)
         for t in range(seq_len):
-            inputs = x[:, t]
-            ts = timespans[:, t].squeeze()
+            inputs = x[:, t]  # Shape: [batch_size, in_features]
+            ts = timespans[:, t]  # Shape: [batch_size]
             hidden_state = self.rnn_cell(inputs, hidden_state, ts)
             current_output = self.fc(hidden_state[0])
             outputs.append(current_output)
-            if mask is not None:
-                cur_mask = mask[:, t].view(batch_size, 1)
-                last_output = cur_mask * current_output + (1.0 - cur_mask) * last_output
-            else:
-                last_output = current_output
 
         if self.return_sequences:
             outputs = torch.stack(outputs, dim=1)  # Return entire sequence
