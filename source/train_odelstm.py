@@ -475,7 +475,7 @@ def train(args, **kwargs):
             'optimizer_state_dict': optimizer.state_dict()
         }, model_path)
 
-
+# python ronin/source/train_odelstm.py test --data_dir data/unseen_subjects_test_set/ --test_list ronin/lists/list_train_amended.txt --model_path lstmode2/checkpoints/icheckpoint_22.pt --out_dir lstmode2test --device cuda:0
 def test(args, **kwargs):
     global device, _output_channel
 
@@ -656,6 +656,14 @@ if __name__ == '__main__':
     train_cmd.add_argument('--save_interval', type=int)
     train_cmd.add_argument('--lr', '--learning_rate', type=float)
 
+
+    test_cmd = mode.add_parser('test')
+    test_cmd.add_argument('--test_path', type=str, default=None)
+    test_cmd.add_argument('--test_list', type=str, default=None)
+    test_cmd.add_argument('--model_path', type=str, default=None)
+    test_cmd.add_argument('--fast_test', action='store_true')
+    test_cmd.add_argument('--show_plot', action='store_true')
+    
     args, unknown_args = parser.parse_known_args()
 
     np.set_printoptions(formatter={'all': lambda x: '{:.6f}'.format(x)})
@@ -665,6 +673,8 @@ if __name__ == '__main__':
 
     if args.mode == 'train':
         train(args, **kwargs)
+    elif args.mode == 'test':
+        test(args, **kwargs)
     else:
         raise NotImplementedError("Only train mode is implemented in this script for ODELSTM.")
 
