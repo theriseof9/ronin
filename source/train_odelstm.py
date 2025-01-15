@@ -111,7 +111,7 @@ class ODELSTM(torch.nn.Module):
             if inputs.dim() == 3:
                 print("Squeezing inputs at time step {} from shape {}".format(t, inputs.shape))
                 inputs = inputs.squeeze(1)
-            print("inputs shape at time step {}: {}".format(t, inputs.shape))  # Debug print
+            # print("inputs shape at time step {}: {}".format(t, inputs.shape))  # Debug print
             ts = timespans[:, t].squeeze()
             hidden_state = self.rnn_cell(inputs, hidden_state, ts)
             current_output = self.fc(hidden_state[0])
