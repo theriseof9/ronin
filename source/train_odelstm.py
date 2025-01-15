@@ -553,8 +553,7 @@ def test(args, **kwargs):
         feat = torch.Tensor(feat).to(device)
         timespans = torch.ones(feat.size(0), feat.size(1), device=device)
         with torch.no_grad():
-            preds = network(feat.unsqueeze(0), timespans.unsqueeze(0))
-        preds = preds.squeeze(0).cpu().numpy()
+            preds = network(feat, timespans)
         preds = preds[-vel.shape[0]:, :_output_channel]
         ind = np.arange(vel.shape[0])
 
