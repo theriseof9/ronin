@@ -491,13 +491,12 @@ def recon_traj_with_preds_global(dataset, preds, timespans, ind=None, seq_id=0, 
 
 
 # python ronin/source/train_odelstm.py test --data_dir data/unseen_subjects_test_set/ --test_list ronin/lists/list_train_amended.txt --model_path lstmode2/checkpoints/icheckpoint_22.pt --out_dir lstmode2test --device cuda:0
+
+
 def test(args, **kwargs):
     global device, _output_channel
-
     import matplotlib.pyplot as plt
-
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
-
     if args.test_path is not None:
         if args.test_path[-1] == '/':
             args.test_path = args.test_path[:-1]
@@ -511,16 +510,15 @@ def test(args, **kwargs):
         raise ValueError('Either test_path or test_list must be specified.')
 
     # Load the first sequence to update the input and output size
-    _ = get_dataset(root_dir, [test_data_list[0]], args, mode='test')
+    _ = get_dataset(root_dir, [test_data_list[0]], args, mode='test')  # Just to set global params
 
     if args.out_dir and not osp.exists(args.out_dir):
         os.makedirs(args.out_dir)
 
     with open(osp.join(str(Path(args.model_path).parents[1]), 'config.json'), 'r') as f:
         model_data = json.load(f)
-
     if device.type == 'cpu':
-        checkpoint = torch.load(args.model_path, map_location=lambda storage, location: storage)
+        checkpoint = torch.load(args.model_path, map_location=torch.device('cpu'))
     else:
         checkpoint = torch.load(args.model_path, map_location={model_data['device']: args.device})
 
@@ -534,7 +532,7 @@ def test(args, **kwargs):
         log_file = osp.join(args.out_dir, osp.split(args.test_list)[-1].split('.')[0] + '_log.txt')
         with open(log_file, 'w') as f:
             f.write(args.model_path + '\n')
-            f.write('Seq traj_len velocity ate rte\n')
+            f.write('Seq\ttraj_len\tvelocity\tate\trte\n')
 
     losses_vel = MSEAverageMeter(2, [1], _output_channel)
     ate_all, rte_all = [], []
@@ -544,46 +542,45 @@ def test(args, **kwargs):
 
     for idx, data in enumerate(test_data_list):
         assert data == osp.split(seq_dataset.data_path[idx])[1]
-
-        feat, vel = seq_dataset.get_test_seq(idx)  # Adjusted to get timespans
-        feat = torch.Tensor(feat).to(device)
-        timespans = torch.ones(feat.size(0), feat.size(1), device=device)
+        feat, vel = seq_dataset.get_test_seq(idx)
+        # Ensure feat is of shape [1, seq_len, input_size]
+        feat = torch.Tensor(feat).unsqueeze(0).to(device)  # Add batch dimension
+        # Since timespans are constant, we can pass None or ones
+        timespans = torch.ones(feat.shape[:2], device=device)  # Shape [1, seq_len]
         with torch.no_grad():
-            preds = network(feat, timespans)
-        preds = np.squeeze(preds.cpu().detach().numpy())
+            preds = network(feat, timespans).cpu().numpy().squeeze(0)
+        # Adjust preds to match vel.shape[0]
         preds = preds[-vel.shape[0]:, :_output_channel]
         ind = np.arange(vel.shape[0])
+
         vel_losses = np.mean((vel - preds) ** 2, axis=0)
         losses_vel.add(vel, preds)
 
         print('Reconstructing trajectory')
-        pos_pred = recon_traj_with_preds_global(seq_dataset, preds, timespans.cpu().numpy(), ind=ind, type='pred', seq_id=idx)
-        pos_gt = recon_traj_with_preds_global(seq_dataset, vel, timespans.cpu().numpy(), ind=ind, type='gt', seq_id=idx)
+        pos_pred, gv_pred, _ = recon_traj_with_preds_global(seq_dataset, preds, ind=ind, type='pred', seq_id=idx)
+        pos_gt, gv_gt, _ = recon_traj_with_preds_global(seq_dataset, vel, ind=ind, type='gt', seq_id=idx)
 
         if args.out_dir is not None and osp.isdir(args.out_dir):
-            np.save(osp.join(args.out_dir, '{}_{}.npy'.format(data, 'odelstm')), np.concatenate([pos_pred, pos_gt], axis=1))
+            np.save(osp.join(args.out_dir, '{}_odelstm.npy'.format(data)), np.concatenate([pos_pred, pos_gt], axis=1))
 
         ate = compute_absolute_trajectory_error(pos_pred, pos_gt)
         if pos_pred.shape[0] < pred_per_min:
             ratio = pred_per_min / pos_pred.shape[0]
-            rte = compute_relative_trajectory_error(pos_pred, pos_gt, delta=pos_pred.shape[0] - 1) * ratio
+            rte = compute_relative_trajectory_error(pos_pred, pos_gt, delta=pos_pred.shape[0] -1) * ratio
         else:
             rte = compute_relative_trajectory_error(pos_pred, pos_gt, delta=pred_per_min)
         pos_cum_error = np.linalg.norm(pos_pred - pos_gt, axis=1)
-
         ate_all.append(ate)
         rte_all.append(rte)
-
         print('Sequence {}, Velocity loss {} / {}, ATE: {}, RTE:{}'.format(data, vel_losses, np.mean(vel_losses), ate, rte))
-        log_line = format_string(data, np.mean(vel_losses), ate, rte)
 
+        # Optional plotting code here
         if not args.fast_test:
             kp = preds.shape[1]
             if kp == 2:
                 targ_names = ['vx', 'vy']
             elif kp == 3:
                 targ_names = ['vx', 'vy', 'vz']
-
             plt.figure('{}'.format(data), figsize=(16, 9))
             plt.subplot2grid((kp, 2), (0, 0), rowspan=kp - 1)
             plt.plot(pos_pred[:, 0], pos_pred[:, 1])
@@ -591,11 +588,9 @@ def test(args, **kwargs):
             plt.title(data)
             plt.axis('equal')
             plt.legend(['Predicted', 'Ground truth'])
-
             plt.subplot2grid((kp, 2), (kp - 1, 0))
             plt.plot(pos_cum_error)
             plt.legend(['ATE:{:.3f}, RTE:{:.3f}'.format(ate_all[-1], rte_all[-1])])
-
             for i in range(kp):
                 plt.subplot2grid((kp, 2), (i, 1))
                 plt.plot(ind, preds[:, i])
@@ -603,19 +598,18 @@ def test(args, **kwargs):
                 plt.legend(['Predicted', 'Ground truth'])
                 plt.title('{}, error: {:.6f}'.format(targ_names[i], vel_losses[i]))
             plt.tight_layout()
-
             if args.show_plot:
                 plt.show()
             if args.out_dir is not None and osp.isdir(args.out_dir):
-                plt.savefig(osp.join(args.out_dir, '{}_{}.png'.format(data, 'odelstm')))
-
+                plt.savefig(osp.join(args.out_dir, '{}_odelstm.png'.format(data)))
             plt.close('all')
 
         if log_file is not None:
+            log_line = format_string(data, np.mean(vel_losses), ate, rte)
             with open(log_file, 'a') as f:
-                log_line += '\n'
-                f.write(log_line)
+                f.write(log_line + '\n')
 
+    # Compute and print overall metrics
     ate_all = np.array(ate_all)
     rte_all = np.array(rte_all)
     measure = format_string('ATE', 'RTE', sep='\t')
@@ -625,7 +619,6 @@ def test(args, **kwargs):
         with open(log_file, 'a') as f:
             f.write(measure + '\n')
             f.write(values)
-
 
 if __name__ == '__main__':
     """
