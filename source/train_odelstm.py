@@ -554,6 +554,7 @@ def test(args, **kwargs):
         timespans = torch.ones(feat.size(0), feat.size(1), device=device)
         with torch.no_grad():
             preds = network(feat, timespans)
+        preds = np.squeeze(preds.cpu().detach().numpy())
         preds = preds[-vel.shape[0]:, :_output_channel]
         ind = np.arange(vel.shape[0])
         preds = preds.cpu().numpy()
