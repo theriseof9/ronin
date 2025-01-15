@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
-
+from tqdm import tqdm
 # Ensure that the ODELSTM classes are defined or imported
 # In this example, they are defined within the script
 
@@ -380,7 +380,7 @@ def train(args, **kwargs):
             train_vel = MSEAverageMeter(3, [2], _output_channel)
             train_loss = 0
             start_t = time.time()
-            for bid, batch in enumerate(train_loader):
+            for bid, batch in tqdm(enumerate(train_loader), total=train_mini_batches):
                 # Assume batch returns feat, targ, timespans, _, _
                 feat, targ, _, _ = batch
                 timespans = torch.ones(feat.size(0), feat.size(1), device=device)
