@@ -475,6 +475,25 @@ def train(args, **kwargs):
             'optimizer_state_dict': optimizer.state_dict()
         }, model_path)
 
+
+def recon_traj_with_preds_global(dataset, preds, ind=None, seq_id=0, type='preds', **kwargs):
+    ind = ind if ind is not None else np.array([i[1] for i in dataset.index_map if i[0] == seq_id], dtype=int)
+
+    if type == 'gt':
+        pos = dataset.gt_pos[seq_id][:, :2]
+    else:
+        ts = dataset.ts[seq_id]
+        # Compute the global velocity from local velocity.
+        dts = np.mean(ts[ind[1:]] - ts[ind[:-1]])
+        pos = preds * dts
+        pos[0, :] = dataset.gt_pos[seq_id][0, :2]
+        pos = np.cumsum(pos, axis=0)
+    veloc = preds
+    ori = dataset.orientations[seq_id]
+
+    return pos, veloc, ori
+
+
 # python ronin/source/train_odelstm.py test --data_dir data/unseen_subjects_test_set/ --test_list ronin/lists/list_train_amended.txt --model_path lstmode2/checkpoints/icheckpoint_22.pt --out_dir lstmode2test --device cuda:0
 def test(args, **kwargs):
     global device, _output_channel
@@ -530,10 +549,9 @@ def test(args, **kwargs):
     for idx, data in enumerate(test_data_list):
         assert data == osp.split(seq_dataset.data_path[idx])[1]
 
-        feat, vel, timespans = seq_dataset.get_test_seq(idx)  # Adjusted to get timespans
+        feat, vel = seq_dataset.get_test_seq(idx)  # Adjusted to get timespans
         feat = torch.Tensor(feat).to(device)
-        timespans = torch.Tensor(timespans).to(device)
-
+        timespans = torch.ones(feat.size(0), feat.size(1), device=device)
         with torch.no_grad():
             preds = network(feat.unsqueeze(0), timespans.unsqueeze(0))
         preds = preds.squeeze(0).cpu().numpy()
@@ -663,7 +681,7 @@ if __name__ == '__main__':
     test_cmd.add_argument('--model_path', type=str, default=None)
     test_cmd.add_argument('--fast_test', action='store_true')
     test_cmd.add_argument('--show_plot', action='store_true')
-    
+
     args, unknown_args = parser.parse_known_args()
 
     np.set_printoptions(formatter={'all': lambda x: '{:.6f}'.format(x)})
