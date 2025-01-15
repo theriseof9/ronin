@@ -495,6 +495,7 @@ def test(args, **kwargs):
     global device, _output_channel
     import matplotlib.pyplot as plt
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+
     if args.test_path is not None:
         if args.test_path[-1] == '/':
             args.test_path = args.test_path[:-1]
@@ -508,17 +509,18 @@ def test(args, **kwargs):
         raise ValueError('Either test_path or test_list must be specified.')
 
     # Load the first sequence to update the input and output size
-    _ = get_dataset(root_dir, [test_data_list[0]], args, mode='test')  # Just to set global params
+    _ = get_dataset(root_dir, [test_data_list[0]], args, mode='test')
 
     if args.out_dir and not osp.exists(args.out_dir):
         os.makedirs(args.out_dir)
 
+    # Load the saved model
     with open(osp.join(str(Path(args.model_path).parents[1]), 'config.json'), 'r') as f:
         model_data = json.load(f)
     if device.type == 'cpu':
-        checkpoint = torch.load(args.model_path, map_location=torch.device('cpu'))
+        checkpoint = torch.load(args.model_path, map_location=lambda storage, location: storage)
     else:
-        checkpoint = torch.load(args.model_path, map_location={model_data['device']: args.device})
+        checkpoint = torch.load(args.model_path, map_location={model_data.get('device', 'cpu'): args.device})
 
     network = get_model(args, **kwargs)
     network.load_state_dict(checkpoint.get('model_state_dict'))
@@ -530,72 +532,50 @@ def test(args, **kwargs):
         log_file = osp.join(args.out_dir, osp.split(args.test_list)[-1].split('.')[0] + '_log.txt')
         with open(log_file, 'w') as f:
             f.write(args.model_path + '\n')
-            f.write('Seq\ttraj_len\tvelocity\tate\trte\n')
+            f.write('Seq\tATE\tRTE\n')
 
     losses_vel = MSEAverageMeter(2, [1], _output_channel)
     ate_all, rte_all = [], []
-    pred_per_min = 200 * 60
+    pred_per_min = 200 * 60  # Adjust based on your sampling rate
 
     seq_dataset = get_dataset(root_dir, test_data_list, args, mode='test', **kwargs)
-
-    window_size = args.window_size  # Use window_size from args
-
     for idx, data in enumerate(test_data_list):
         assert data == osp.split(seq_dataset.data_path[idx])[1]
-        feat_full, vel_full = seq_dataset.get_test_seq(idx)
-        seq_len = feat_full.shape[0]
+        feat, vel = seq_dataset.get_test_seq(idx)
+        feat = torch.Tensor(feat).unsqueeze(0).to(device)  # Add batch dimension
 
-        print(f'Processing sequence {idx+1}/{len(test_data_list)}: {data}')
-        print(f'Sequence length: {seq_len}')
+        # Assuming constant timespans
+        timespans = torch.ones((feat.size(0), feat.size(1)), device=device)
 
-        preds_list = []
-        vel_list = []
         with torch.no_grad():
-            for start_idx in range(0, seq_len, window_size):
-                end_idx = min(start_idx + window_size, seq_len)
-
-                feat = feat_full[start_idx:end_idx]
-                vel = vel_full[start_idx:end_idx]
-
-                # Ensure feat is of shape [1, seq_len, input_size]
-                feat = torch.Tensor(feat).unsqueeze(0).to(device)  # Add batch dimension
-
-                # Since timespans are constant, we can use ones
-                timespans = torch.ones(feat.shape[:2], device=device)  # Shape [1, seq_len]
-
-                # Forward pass
-                pred = network(feat, timespans).cpu().numpy().squeeze(0)
-                preds_list.append(pred)
-                vel_list.append(vel)
-
-        preds = np.concatenate(preds_list, axis=0)
-        vel = np.concatenate(vel_list, axis=0)
-        # Adjust preds to match vel length
-        preds = preds[:vel.shape[0], :_output_channel]
+            preds = network(feat, timespans)  # Pass timespans to network
+        preds = preds.cpu().numpy().squeeze(0)  # Remove batch dimension
+        vel = vel[:preds.shape[0], :_output_channel]
         ind = np.arange(vel.shape[0])
 
         vel_losses = np.mean((vel - preds) ** 2, axis=0)
         losses_vel.add(vel, preds)
-
         print('Reconstructing trajectory')
         pos_pred, gv_pred, _ = recon_traj_with_preds_global(seq_dataset, preds, ind=ind, type='pred', seq_id=idx)
         pos_gt, gv_gt, _ = recon_traj_with_preds_global(seq_dataset, vel, ind=ind, type='gt', seq_id=idx)
 
         if args.out_dir is not None and osp.isdir(args.out_dir):
-            np.save(osp.join(args.out_dir, '{}_odelstm.npy'.format(data)), np.concatenate([pos_pred, pos_gt], axis=1))
+            np.save(osp.join(args.out_dir, '{}_odelstm.npy'.format(data)),
+                    np.concatenate([pos_pred, pos_gt], axis=1))
 
         ate = compute_absolute_trajectory_error(pos_pred, pos_gt)
         if pos_pred.shape[0] < pred_per_min:
             ratio = pred_per_min / pos_pred.shape[0]
-            rte = compute_relative_trajectory_error(pos_pred, pos_gt, delta=pos_pred.shape[0] -1) * ratio
+            rte = compute_relative_trajectory_error(pos_pred, pos_gt, delta=pos_pred.shape[0] - 1) * ratio
         else:
             rte = compute_relative_trajectory_error(pos_pred, pos_gt, delta=pred_per_min)
+
         pos_cum_error = np.linalg.norm(pos_pred - pos_gt, axis=1)
         ate_all.append(ate)
         rte_all.append(rte)
         print('Sequence {}, Velocity loss {} / {}, ATE: {}, RTE:{}'.format(data, vel_losses, np.mean(vel_losses), ate, rte))
+        log_line = format_string(data, np.mean(vel_losses), ate, rte)
 
-        # Optional plotting code here
         if not args.fast_test:
             kp = preds.shape[1]
             if kp == 2:
@@ -626,11 +606,10 @@ def test(args, **kwargs):
             plt.close('all')
 
         if log_file is not None:
-            log_line = format_string(data, np.mean(vel_losses), ate, rte)
             with open(log_file, 'a') as f:
-                f.write(log_line + '\n')
+                log_line += '\n'
+                f.write(log_line)
 
-    # Compute and print overall metrics
     ate_all = np.array(ate_all)
     rte_all = np.array(rte_all)
     measure = format_string('ATE', 'RTE', sep='\t')
