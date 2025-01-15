@@ -556,7 +556,7 @@ def test(args, **kwargs):
             preds = network(feat, timespans)
         preds = preds[-vel.shape[0]:, :_output_channel]
         ind = np.arange(vel.shape[0])
-
+        preds = preds.cpu().numpy()
         vel_losses = np.mean((vel - preds) ** 2, axis=0)
         losses_vel.add(vel, preds)
 
