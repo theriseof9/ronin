@@ -382,7 +382,8 @@ def train(args, **kwargs):
             start_t = time.time()
             for bid, batch in enumerate(train_loader):
                 # Assume batch returns feat, targ, timespans, _, _
-                feat, targ, timespans, _, _ = batch
+                feat, targ, _, _ = batch
+                timespans = torch.ones(feat.size(0), feat.size(1), device=device)
                 feat, targ, timespans = feat.to(device), targ.to(device), timespans.to(device)
 
                 optimizer.zero_grad()
