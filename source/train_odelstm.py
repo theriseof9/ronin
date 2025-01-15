@@ -26,6 +26,7 @@ _input_channel, _output_channel = 6, 2  # Adjust based on your data
 device = 'cpu'
 
 
+
 class ODELSTMCell(torch.nn.Module):
     def __init__(self, input_size, hidden_size, solver_type="fixed_rk4"):
         super(ODELSTMCell, self).__init__()
@@ -619,7 +620,7 @@ def test(args, **kwargs):
         with open(log_file, 'a') as f:
             f.write(measure + '\n')
             f.write(values)
-            
+
 
 if __name__ == '__main__':
     """
